@@ -2,6 +2,10 @@ import os
 import re
 import fitz
 import chromadb
+import anthropic
+from dotenv import load_dotenv
+
+load_dotenv()
 
 DOCS_DIR = os.path.dirname(os.path.abspath(__file__))
 CHROMA_DIR = os.path.join(DOCS_DIR, "chroma_db")
@@ -22,7 +26,7 @@ DOCUMENTS = [
 MAX_CHUNK_SIZE = 1500
 MIN_CHUNK_SIZE = 100
 
-RULE_HEADER = re.compile(r"^(Rule\s+\d+)", re.MULTILINE)
+RULE_HEADER = re.compile(r"^(RULE\s+\d+)\.\s*(.*)", re.MULTILINE)
 SECTION_HEADER = re.compile(r"^(Sec\s+\d+)", re.MULTILINE)
 LETTER_ITEM = re.compile(r"^\s*([A-Z])\.\s", re.MULTILINE)
 NUMBERED_ITEM = re.compile(r"^\s*(\d+)\.\s", re.MULTILINE)
@@ -62,7 +66,8 @@ def build_sections(full_text: str) -> list[dict]:
 
         if rule_match:
             flush()
-            current_rule = rule_match.group(1)
+            title = rule_match.group(2).strip()
+            current_rule = f"{rule_match.group(1)}. {title}" if title else rule_match.group(1)
             current_sec = ""
             current_item = ""
             current_lines = [line]
@@ -146,6 +151,30 @@ def chunk_supplementary(pages: list[tuple[int, str]]) -> list[dict]:
     return chunks
 
 
+ENRICH_PROMPT = """You are indexing a youth softball league's supplementary rules for search. Given this rule text, write 2-3 short sentences describing what game SITUATIONS this rule applies to. Use common coaching language — how would a coach or parent describe this situation during a game?
+
+For example, for a rule about runners being limited to one base per pitch on a steal, you might write:
+"Applies when a runner tries to advance during a pitch. Covers stolen bases and how far runners can go. Relevant when asking about base stealing limits."
+
+Rule text:
+{rule_text}
+
+Write ONLY the situation description, nothing else."""
+
+
+def enrich_supplementary_chunk(rule_text: str) -> str:
+    client = anthropic.Anthropic()
+    message = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=150,
+        messages=[{
+            "role": "user",
+            "content": ENRICH_PROMPT.format(rule_text=rule_text),
+        }],
+    )
+    return message.content[0].text.strip()
+
+
 def find_page_for_position(pages: list[tuple[int, str]], full_text: str, position: int) -> int:
     """Find which page a character position in the concatenated text belongs to."""
     offset = 0
@@ -188,8 +217,11 @@ def ingest():
 
         if source == "supplementary":
             chunks_with_context = chunk_supplementary(pages)
+            print(f"  Enriching {len(chunks_with_context)} chunks with semantic descriptions...")
             for chunk_info in chunks_with_context:
-                all_docs.append(chunk_info["text"])
+                enrichment = enrich_supplementary_chunk(chunk_info["text"])
+                enriched_text = f"[SITUATIONS: {enrichment}]\n{chunk_info['text']}"
+                all_docs.append(enriched_text)
                 all_metadatas.append({
                     "source": source,
                     "priority": priority,
@@ -198,7 +230,8 @@ def ingest():
                 })
                 all_ids.append(f"{source}_c{chunk_id}")
                 chunk_id += 1
-            print(f"  Created {len(chunks_with_context)} chunks")
+                print(f"    Enriched: {chunk_info['context']}")
+            print(f"  Created {len(chunks_with_context)} enriched chunks")
         else:
             full_text = "\n\n".join(text for _, text in pages)
             sections = build_sections(full_text)

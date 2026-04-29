@@ -124,6 +124,9 @@ def keyword_search(keywords: list[str], collection, n_results: int = 10) -> list
     return scored[:n_results]
 
 
+SUPPLEMENTARY_SLOTS = 3
+
+
 def retrieve_chunks(question: str, n_results: int = TOP_K) -> list[dict]:
     collection = get_collection()
 
@@ -147,6 +150,26 @@ def retrieve_chunks(question: str, n_results: int = TOP_K) -> list[dict]:
                 "distance": results["distances"][0][i],
                 "keyword_score": 0,
             })
+
+    # Dedicated supplementary search — ensures the best supplementary
+    # matches are always considered, even if they rank poorly globally
+    for query in queries:
+        supp_results = collection.query(
+            query_texts=[query],
+            n_results=SUPPLEMENTARY_SLOTS,
+            where={"source": "supplementary"},
+        )
+        for i in range(len(supp_results["documents"][0])):
+            chunk_id = supp_results["ids"][0][i]
+            if chunk_id not in seen_ids:
+                seen_ids.add(chunk_id)
+                all_chunks.append({
+                    "id": chunk_id,
+                    "text": supp_results["documents"][0][i],
+                    "metadata": supp_results["metadatas"][0][i],
+                    "distance": supp_results["distances"][0][i],
+                    "keyword_score": 0,
+                })
 
     kw_results = keyword_search(keywords, collection)
     for kw_chunk in kw_results:
