@@ -31,6 +31,14 @@ def has_embedding_model() -> bool:
     return get_embedding_model() is not None
 
 
+def normalize_unicode(text: str) -> str:
+    """Normalize smart quotes and other unicode for consistent matching."""
+    return (text
+            .replace("‘", "'").replace("’", "'")
+            .replace("“", '"').replace("”", '"')
+            .replace("–", "-").replace("—", "-"))
+
+
 def save_store(chunks: list[dict]):
     """Save chunks with pre-computed embeddings."""
     os.makedirs(STORE_DIR, exist_ok=True)
@@ -39,14 +47,14 @@ def save_store(chunks: list[dict]):
     if model is None:
         raise RuntimeError("Embedding model not available. Run ingestion locally.")
 
-    texts = [c["text"] for c in chunks]
+    texts = [normalize_unicode(c["text"]) for c in chunks]
     embeddings = model(input=texts)
     embeddings_array = np.array(embeddings, dtype=np.float32)
 
     np.save(EMBEDDINGS_FILE, embeddings_array)
 
     metadata = [{
-        "text": c["text"],
+        "text": normalize_unicode(c["text"]),
         "source": c["metadata"]["source"],
         "priority": c["metadata"]["priority"],
         "context": c["metadata"].get("context", ""),

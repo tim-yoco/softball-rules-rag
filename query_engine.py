@@ -88,16 +88,24 @@ def extract_keywords(question: str) -> list[str]:
     return keywords
 
 
+def normalize_text(text: str) -> str:
+    """Normalize smart quotes and other unicode variants for matching."""
+    return (text
+            .replace("‘", "'").replace("’", "'")
+            .replace("“", '"').replace("”", '"')
+            .replace("–", "-").replace("—", "-"))
+
+
 def keyword_search(keywords: list[str], n_results: int = 10) -> list[dict]:
     """Search all documents for keyword matches. Multi-word phrase matches score higher."""
     _, metadata = load_store()
     scored = []
 
     for i, entry in enumerate(metadata):
-        doc_lower = entry["text"].lower()
+        doc_lower = normalize_text(entry["text"]).lower()
         score = 0.0
         for kw in keywords:
-            kw_lower = kw.lower()
+            kw_lower = normalize_text(kw).lower()
             phrase_matches = len(re.findall(re.escape(kw_lower), doc_lower))
             if phrase_matches > 0:
                 word_count = len(kw_lower.split())
