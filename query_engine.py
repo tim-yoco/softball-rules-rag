@@ -20,7 +20,8 @@ You have access to two sources of rules:
 IMPORTANT: When supplementary rules and core rules conflict, the SUPPLEMENTARY rules take precedence. Always note when a supplementary rule overrides a core rule.
 
 When answering:
-- Start with a clear, direct YES or NO (or the key fact), then explain. Never contradict your opening line.
+- IMPORTANT: First, read all the provided rules excerpts and identify the single most specific rule that applies. Then write your answer based on that rule. Your response must start directly with the ruling — never start with phrases like "I need to identify" or "Let me find" or "The most specific rule is".
+- State the ruling in your first sentence. Everything after must be consistent with that first sentence — never contradict it.
 - Be concise and direct — this will be read on a phone during a game.
 - Use minimal formatting. No markdown headers (#), horizontal rules (---), or excessive bullet nesting. Short paragraphs and bold for emphasis are fine.
 - Cite which source (supplementary or core) your answer comes from.
@@ -203,7 +204,11 @@ def ask(question: str) -> str:
     client = get_client()
     message = client.messages.create(
         model="claude-haiku-4-5-20251001",
-        max_tokens=1024,
+        max_tokens=16000,
+        thinking={
+            "type": "enabled",
+            "budget_tokens": 5000,
+        },
         system=SYSTEM_PROMPT,
         messages=[
             {
@@ -218,4 +223,7 @@ def ask(question: str) -> str:
             }
         ],
     )
-    return message.content[0].text
+    for block in message.content:
+        if block.type == "text":
+            return block.text
+    return ""
