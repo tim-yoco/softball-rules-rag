@@ -265,6 +265,12 @@ def ingest():
     print(f"\nTotal chunks ingested: {collection.count()}")
     print(f"ChromaDB stored at: {CHROMA_DIR}")
 
+    from vector_store import save_store
+    print("\nSaving lightweight vector store for deployment...")
+    all_chunks = [{"text": doc, "metadata": meta}
+                  for doc, meta in zip(all_docs, all_metadatas)]
+    save_store(all_chunks)
+
 
 if __name__ == "__main__":
     ingest()

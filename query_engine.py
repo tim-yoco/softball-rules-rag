@@ -1,13 +1,13 @@
 import os
 import re
+import json
 from dotenv import load_dotenv
 
 load_dotenv()
 
-import chromadb
 import anthropic
+from vector_store import query_store, load_store
 
-CHROMA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "chroma_db")
 TOP_K = 15
 EXPANDED_QUERIES = 3
 
@@ -60,11 +60,6 @@ def get_client():
     return anthropic.Anthropic()
 
 
-def get_collection():
-    client = chromadb.PersistentClient(path=CHROMA_DIR)
-    return client.get_collection("softball_rules")
-
-
 def expand_query(question: str) -> list[str]:
     client = get_client()
     message = client.messages.create(
@@ -93,13 +88,13 @@ def extract_keywords(question: str) -> list[str]:
     return keywords
 
 
-def keyword_search(keywords: list[str], collection, n_results: int = 10) -> list[dict]:
+def keyword_search(keywords: list[str], n_results: int = 10) -> list[dict]:
     """Search all documents for keyword matches. Multi-word phrase matches score higher."""
-    all_docs = collection.get(include=["documents", "metadatas"])
+    _, metadata = load_store()
     scored = []
 
-    for doc_id, doc_text, metadata in zip(all_docs["ids"], all_docs["documents"], all_docs["metadatas"]):
-        doc_lower = doc_text.lower()
+    for i, entry in enumerate(metadata):
+        doc_lower = entry["text"].lower()
         score = 0.0
         for kw in keywords:
             kw_lower = kw.lower()
@@ -116,9 +111,9 @@ def keyword_search(keywords: list[str], collection, n_results: int = 10) -> list
 
         if score > 0:
             scored.append({
-                "id": doc_id,
-                "text": doc_text,
-                "metadata": metadata,
+                "id": f"{entry['source']}_c{i}",
+                "text": entry["text"],
+                "metadata": entry,
                 "keyword_score": score,
             })
 
@@ -130,8 +125,6 @@ SUPPLEMENTARY_SLOTS = 3
 
 
 def retrieve_chunks(question: str, n_results: int = TOP_K) -> list[dict]:
-    collection = get_collection()
-
     queries = [question] + expand_query(question)
     keywords = extract_keywords(question)
 
@@ -139,41 +132,25 @@ def retrieve_chunks(question: str, n_results: int = TOP_K) -> list[dict]:
     all_chunks = []
 
     for query in queries:
-        results = collection.query(query_texts=[query], n_results=n_results)
-        for i in range(len(results["documents"][0])):
-            chunk_id = results["ids"][0][i]
-            if chunk_id in seen_ids:
+        results = query_store([query], n_results=n_results)
+        for chunk in results[0]:
+            if chunk["id"] in seen_ids:
                 continue
-            seen_ids.add(chunk_id)
-            all_chunks.append({
-                "id": chunk_id,
-                "text": results["documents"][0][i],
-                "metadata": results["metadatas"][0][i],
-                "distance": results["distances"][0][i],
-                "keyword_score": 0,
-            })
+            seen_ids.add(chunk["id"])
+            chunk["keyword_score"] = 0
+            all_chunks.append(chunk)
 
-    # Dedicated supplementary search — ensures the best supplementary
-    # matches are always considered, even if they rank poorly globally
+    # Dedicated supplementary search
     for query in queries:
-        supp_results = collection.query(
-            query_texts=[query],
-            n_results=SUPPLEMENTARY_SLOTS,
-            where={"source": "supplementary"},
-        )
-        for i in range(len(supp_results["documents"][0])):
-            chunk_id = supp_results["ids"][0][i]
-            if chunk_id not in seen_ids:
-                seen_ids.add(chunk_id)
-                all_chunks.append({
-                    "id": chunk_id,
-                    "text": supp_results["documents"][0][i],
-                    "metadata": supp_results["metadatas"][0][i],
-                    "distance": supp_results["distances"][0][i],
-                    "keyword_score": 0,
-                })
+        supp_results = query_store([query], n_results=SUPPLEMENTARY_SLOTS,
+                                   where={"source": "supplementary"})
+        for chunk in supp_results[0]:
+            if chunk["id"] not in seen_ids:
+                seen_ids.add(chunk["id"])
+                chunk["keyword_score"] = 0
+                all_chunks.append(chunk)
 
-    kw_results = keyword_search(keywords, collection)
+    kw_results = keyword_search(keywords)
     for kw_chunk in kw_results:
         if kw_chunk["id"] in seen_ids:
             for c in all_chunks:
@@ -182,13 +159,8 @@ def retrieve_chunks(question: str, n_results: int = TOP_K) -> list[dict]:
                     break
         else:
             seen_ids.add(kw_chunk["id"])
-            all_chunks.append({
-                "id": kw_chunk["id"],
-                "text": kw_chunk["text"],
-                "metadata": kw_chunk["metadata"],
-                "distance": 0.4,
-                "keyword_score": kw_chunk["keyword_score"],
-            })
+            kw_chunk["distance"] = 0.4
+            all_chunks.append(kw_chunk)
 
     max_kw = max((c["keyword_score"] for c in all_chunks), default=1) or 1
 

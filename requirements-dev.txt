@@ -1,0 +1,3 @@
+-r requirements.txt
+chromadb>=1.0.0
+pymupdf>=1.25.0
