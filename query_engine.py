@@ -20,7 +20,9 @@ You have access to two sources of rules:
 IMPORTANT: When supplementary rules and core rules conflict, the SUPPLEMENTARY rules take precedence. Always note when a supplementary rule overrides a core rule.
 
 When answering:
+- Start with a clear, direct YES or NO (or the key fact), then explain. Never contradict your opening line.
 - Be concise and direct — this will be read on a phone during a game.
+- Use minimal formatting. No markdown headers (#), horizontal rules (---), or excessive bullet nesting. Short paragraphs and bold for emphasis are fine.
 - Cite which source (supplementary or core) your answer comes from.
 - If the rules don't clearly address the situation, say so and offer the closest applicable rule.
 - If you're unsure, say so rather than guessing.
@@ -220,7 +222,7 @@ def ask(question: str) -> str:
 
     client = get_client()
     message = client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model="claude-haiku-4-5-20251001",
         max_tokens=1024,
         system=SYSTEM_PROMPT,
         messages=[
